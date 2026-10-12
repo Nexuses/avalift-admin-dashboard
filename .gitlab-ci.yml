@@ -1,0 +1,40 @@
+stages:
+  - sync
+
+sync-to-aws:
+  stage: sync
+  image: python:3.9-slim
+  rules:
+    - if: '$CI_COMMIT_BRANCH == "Staging-adminpanel-zeizzu"'
+  variables:
+    AWS_DEFAULT_REGION: "ap-southeast-1"
+    CODECOMMIT_REPO_NAME_STAGING: "Staging-Admin-repo"
+    CODECOMMIT_REPO_URL_STAGING: "https://git-codecommit.ap-southeast-1.amazonaws.com/v1/repos/Staging-Admin-repo"
+  before_script:
+    # Install Git, curl, unzip
+    - apt-get update && apt-get install -y git curl unzip
+
+    # Install AWS CLI v2
+    - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+    - unzip awscliv2.zip
+    - ./aws/install
+    - rm -rf awscliv2.zip aws
+
+    # Configure Git to use AWS CodeCommit credential helper
+    - git config --global user.email "ci@gitlab.com"
+    - git config --global user.name "GitLab CI"
+    - git config --global credential.helper '!aws codecommit credential-helper $@'
+    - git config --global credential.UseHttpPath true
+
+  script:
+    # Validate AWS credentials
+    - aws sts get-caller-identity > /dev/null 2>&1
+
+    # Clone GitLab repository
+    - git clone "$CI_REPOSITORY_URL" temp-repo
+    - cd temp-repo
+    - git checkout -B Staging-adminpanel-zeizzu origin/Staging-adminpanel-zeizzu
+
+    # Add CodeCommit as a remote and push
+    - git remote add codecommit "$CODECOMMIT_REPO_URL_STAGING"
+    - git push codecommit Staging-adminpanel-zeizzu --force

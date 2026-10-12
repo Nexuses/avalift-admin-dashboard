@@ -1,0 +1,22 @@
+version: 0.2
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 20
+  build:
+    commands:
+      - echo "[BUILD] Installing dependencies with npm..."
+      - npm install
+      - echo "[BUILD] Building frontend..."
+      - npm run build
+      - mkdir -p build-artifact/scripts
+      - cp -r dist/* build-artifact/
+      - cp appspec.yml build-artifact/
+      - cp -r scripts/* build-artifact/scripts/
+
+artifacts:
+  files:
+    - '**/*'
+  base-directory: build-artifact
+  discard-paths: yes

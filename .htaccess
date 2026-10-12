@@ -1,0 +1,16 @@
+<IfModule mod_rewrite.c>
+  RewriteEngine On
+  RewriteBase /
+
+  # Redirect all requests to index.html
+  RewriteRule ^index\.html$ - [L]
+  RewriteCond %{REQUEST_FILENAME} !-f
+  RewriteCond %{REQUEST_FILENAME} !-d
+  RewriteRule . /index.html [L]
+</IfModule>
+
+# Serve static assets directly
+<FilesMatch "\.(js|css|jpg|png|gif|ico|svg|woff|woff2|ttf|eot|json)$">
+  Header set Cache-Control "max-age=31536000, public"
+</FilesMatch>
+

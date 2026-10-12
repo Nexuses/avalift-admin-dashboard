@@ -1,0 +1,27 @@
+version: 0.0
+os: linux
+file_exists_behavior: OVERWRITE
+
+files:
+  - source: /
+    destination: /var/www/adminpanel
+    overwrite: true
+
+hooks:
+  BeforeInstall:
+    - location: scripts/cleanup.sh
+      timeout: 60
+      runas: ubuntu
+
+  AfterInstall:
+    - location: scripts/build.sh
+      timeout: 300
+      runas: ubuntu
+    - location: scripts/install.sh
+      timeout: 60
+      runas: ubuntu
+
+  ApplicationStart:
+    - location: scripts/start.sh
+      timeout: 300
+      runas: ubuntu

@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8" />
+  <title>Avalift Admin Panel — Technical Documentation</title>
+  <style>
+    body { font-family: Arial, Helvetica, sans-serif; font-size: 12pt; line-height: 1.45; color: #111; max-width: 900px; margin: 40px auto; padding: 0 24px; }
+    h1 { font-size: 26pt; border-bottom: 2px solid #111; padding-bottom: 8px; }
+    h2 { font-size: 16pt; margin-top: 32px; border-bottom: 1px solid #ccc; padding-bottom: 4px; }
+    h3 { font-size: 13pt; margin-top: 22px; }
+    table { border-collapse: collapse; width: 100%; margin: 12px 0 20px; font-size: 11pt; }
+    th, td { border: 1px solid #444; padding: 6px 8px; vertical-align: top; text-align: left; }
+    th { background: #f0f0f0; }
+    pre { font-family: Consolas, "Courier New", monospace; font-size: 9.5pt; background: #f7f7f7; border: 1px solid #ddd; padding: 12px; overflow-x: auto; white-space: pre; line-height: 1.25; }
+    code { font-family: Consolas, "Courier New", monospace; font-size: 10.5pt; }
+    .meta { color: #444; }
+    .cover { margin-bottom: 36px; }
+    ul, ol { margin-top: 6px; }
+    .note { background: #fff8e1; border: 1px solid #e0c36c; padding: 10px 12px; margin: 12px 0; }
+  </style>
+</head>
+<body>
+
+<div class="cover">
+  <h1>Avalift Admin Panel</h1>
+  <p class="meta"><b>Technical Documentation</b></p>
+  <p class="meta">
+    Product: Avalift (chauffeur / ride operations admin)<br>
+    Application name in code: <code>avalift_admin</code> v0.0.0<br>
+    Type: Frontend Single Page Application (SPA)<br>
+    Document date: 22 September 2026<br>
+    Purpose: Architecture, tech stack, modules, data flow, APIs, and how to run — ready to paste into Google Docs
+  </p>
+</div>
+
+<h2>1. What this application is</h2>
+<p>
+The Avalift Admin Panel is a web dashboard used by internal operations staff (super admin, operators, and other admin roles) to run a chauffeur / taxi platform. It is <b>not</b> a backend. It is a React frontend that talks to a remote REST API.
+</p>
+<p>From this panel, staff can:</p>
+<ul>
+  <li>View a live operations dashboard (stats, charts, scheduled rides)</li>
+  <li>Manage customers, chauffeurs (drivers), PDs (pickup/drop staff), organization customers, and admin users</li>
+  <li>Manage organizations and organization-level pricing</li>
+  <li>Create and monitor rides (on-demand and scheduled)</li>
+  <li>See nearby / available chauffeurs on a map</li>
+  <li>Manage vehicles, brands, and models</li>
+  <li>Handle wallets (customer, chauffeur, PD, admin, tips), cash, invoices, and revenue reports</li>
+  <li>Create coupons and coupon user groups</li>
+  <li>Send push notifications</li>
+  <li>Change password and view account details</li>
+</ul>
+<p>
+There is <b>no mock data layer</b>. After login, almost every screen loads live data from the backend currently configured as:
+</p>
+<p><code>https://api.live.avalift.ae</code></p>
+<p>That host is hardcoded in <code>src/config/apiConfig.ts</code>. It is <b>not</b> read from the <code>.env</code> file.</p>
+
+<h2>2. Document map</h2>
+<ol>
+  <li>What this application is</li>
+  <li>Document map</li>
+  <li>High-level system diagram</li>
+  <li>Tech stack (everything in use)</li>
+  <li>How the app is built and started</li>
+  <li>Folder structure</li>
+  <li>Request / data flow</li>
+  <li>Login, session, and access control</li>
+  <li>Firebase and Google Maps</li>
+  <li>Module catalogue (every screen)</li>
+  <li>API catalogue (grouped by domain)</li>
+  <li>Environments</li>
+  <li>How to run locally</li>
+  <li>Important engineering notes</li>
+</ol>
+
+<h2>3. High-level system diagram</h2>
+<p>This is the full picture of how the admin panel sits in the product.</p>
+<pre>
+                         ┌──────────────────────────────────────────┐
+                         │           Admin user (browser)           │
+                         │   Chrome / Safari @ localhost:5173        │
+                         └────────────────────┬─────────────────────┘
+                                              │
+                                              ▼
+                         ┌──────────────────────────────────────────┐
+                         │     Avalift Admin Panel  (this repo)      │
+                         │  React 18 + TypeScript + Vite 6 SPA       │
+                         │  React Router 7, Tailwind, shadcn/Radix   │
+                         │  Recharts, Ant Design, TanStack Table     │
+                         └─────┬──────────────┬──────────────┬──────┘
+                               │              │              │
+               REST + Bearer   │              │ FCM push     │ Maps JS / Places
+                               ▼              ▼              ▼
+            ┌─────────────────────────┐  ┌─────────────┐  ┌─────────────────────┐
+            │  Avalift REST Backend   │  │  Firebase   │  │  Google Maps        │
+            │  https://api.live.      │  │  Cloud      │  │  Maps, Places,      │
+            │  avalift.ae             │  │  Messaging  │  │  Distance Matrix    │
+            │  /api/auth, /api/admin, │  │  project    │  │  Key from .env      │
+            │  /api/rides, wallets…   │  │  avalift-   │  │  VITE_GOOGLE_MAPS_  │
+            └────────────┬────────────┘  │  740dd      │  │  API_KEY            │
+                         │               └─────────────┘  └─────────────────────┘
+                         ▼
+            ┌─────────────────────────┐
+            │  Backend database(s)    │
+            │  (not in this repo)     │
+            │  users, rides, wallets, │
+            │  orgs, vehicles, etc.   │
+            └─────────────────────────┘
+</pre>
+
+<p><b>What lives in this repo vs what does not</b></p>
+<table>
+  <tr><th>In this repo (frontend)</th><th>Not in this repo</th></tr>
+  <tr>
+    <td>UI screens, routing, forms, tables, charts, maps widgets, API client helpers, Firebase web config</td>
+    <td>REST API implementation, database, ride matching engine, payment gateway server code, chauffeur / customer mobile apps</td>
+  </tr>
+</table>
+
+<h2>4. Tech stack (everything in use)</h2>
+
+<h3>4.1 Core platform</h3>
+<table>
+  <tr><th>Layer</th><th>Technology</th><th>Version (package.json)</th><th>Why it is used</th></tr>
+  <tr><td>UI library</td><td>React</td><td>18.3.1</td><td>Component-based admin UI</td></tr>
+  <tr><td>Language</td><td>TypeScript</td><td>~5.6.2</td><td>Typed pages, services, and props</td></tr>
+  <tr><td>Bundler / dev server</td><td>Vite</td><td>^6.0.5 (runtime seen: 6.0.7)</td><td>Fast local dev and production build</td></tr>
+  <tr><td>React plugin</td><td>@vitejs/plugin-react</td><td>^4.3.4</td><td>JSX / Fast Refresh</td></tr>
+  <tr><td>Routing</td><td>react-router-dom</td><td>^7.1.1</td><td>All admin URLs and nested layout</td></tr>
+  <tr><td>Styling</td><td>Tailwind CSS</td><td>^3.4.17</td><td>Utility CSS for layout and theme</td></tr>
+  <tr><td>CSS pipeline</td><td>PostCSS + Autoprefixer</td><td>8.4.49 / 10.4.20</td><td>Process Tailwind</td></tr>
+  <tr><td>Lint</td><td>ESLint 9 + typescript-eslint + react-hooks / refresh plugins</td><td>as in package.json</td><td>Code quality</td></tr>
+  <tr><td>Module type</td><td>ESM (<code>"type": "module"</code>)</td><td>—</td><td>Native ES imports</td></tr>
+</table>
+
+<h3>4.2 UI kits and components</h3>
+<table>
+  <tr><th>Library</th><th>Role</th></tr>
+  <tr><td>shadcn/ui + Radix UI primitives</td><td>Dialog, dropdown, select, tabs, toast, sidebar, form primitives, accordion, etc.</td></tr>
+  <tr><td>Ant Design (antd)</td><td>Some tables / admin widgets alongside shadcn</td></tr>
+  <tr><td>class-variance-authority, clsx, tailwind-merge</td><td>Conditional class names for shadcn components</td></tr>
+  <tr><td>tailwindcss-animate</td><td>Animation utilities</td></tr>
+  <tr><td>lucide-react + react-icons</td><td>Icons in sidebar and tables</td></tr>
+  <tr><td>framer-motion</td><td>Motion / animation</td></tr>
+  <tr><td>vaul</td><td>Drawer UI</td></tr>
+  <tr><td>cmdk</td><td>Command palette / combobox</td></tr>
+  <tr><td>sonner + Radix toast</td><td>Toasts (login errors, FCM foreground alerts)</td></tr>
+  <tr><td>next-themes</td><td>Theme switching helper (shadcn pattern)</td></tr>
+  <tr><td>react-aria-components</td><td>Accessible component primitives</td></tr>
+  <tr><td>react-lottie-player</td><td>Lottie animations</td></tr>
+</table>
+
+<h3>4.3 Data, forms, tables, charts</h3>
+<table>
+  <tr><th>Library</th><th>Role</th></tr>
+  <tr><td>Native <code>fetch</code> via <code>src/utils/apiFetcher.ts</code></td><td>All REST calls (GET / POST / PUT / DELETE, JSON and FormData)</td></tr>
+  <tr><td>react-hook-form + @hookform/resolvers + zod</td><td>Form state and validation</td></tr>
+  <tr><td>@tanstack/react-table</td><td>Data tables (sort, columns)</td></tr>
+  <tr><td>recharts</td><td>Dashboard pie / bar / area charts</td></tr>
+  <tr><td>date-fns, react-datepicker, react-day-picker</td><td>Date handling and date pickers</td></tr>
+  <tr><td>libphonenumber-js, react-phone-input-2, react-phone-number-input</td><td>Phone number input / validation</td></tr>
+  <tr><td>react-intl</td><td>i18n (available in stack)</td></tr>
+</table>
+
+<h3>4.4 Maps and location</h3>
+<table>
+  <tr><th>Library</th><th>Role</th></tr>
+  <tr><td>@react-google-maps/api</td><td>Google Map embed (rides, nearby chauffeurs)</td></tr>
+  <tr><td>react-google-places-autocomplete</td><td>Pickup / drop address search</td></tr>
+  <tr><td>Google Distance Matrix (browser API)</td><td><code>src/utils/distanceMatrixService.ts</code> — ETA and distance while creating rides</td></tr>
+  <tr><td>leaflet + react-leaflet (installed)</td><td>Present in dependencies; Google Maps is the primary map path in screens</td></tr>
+</table>
+
+<h3>4.5 Push notifications</h3>
+<table>
+  <tr><th>Library / file</th><th>Role</th></tr>
+  <tr><td>firebase JS SDK ^11.2.0</td><td>FCM token + foreground messages</td></tr>
+  <tr><td>firebase-config.tsx</td><td>Web Firebase app config (project avalift-740dd)</td></tr>
+  <tr><td>public/firebase-messaging-sw.js</td><td>Service worker for background push</td></tr>
+</table>
+
+<h3>4.6 What the .env file is used for</h3>
+<table>
+  <tr><th>Variable</th><th>Used for</th><th>Used in</th></tr>
+  <tr><td>VITE_GOOGLE_MAPS_API_KEY</td><td>Google Maps JavaScript API</td><td>RideMap, Add Ride, chauffeur ride details, available chauffeurs map</td></tr>
+</table>
+<p class="note">
+The backend URL is <b>not</b> in .env. Only the Google Maps key is. Firebase keys are hardcoded in <code>firebase-config.tsx</code> and the service worker.
+</p>
+
+<h2>5. How the app is built and started</h2>
+<pre>
+npm i            →  install node_modules
+npm run dev      →  vite          (local http://localhost:5173)
+npm run build    →  tsc -b && vite build   (TypeScript check + dist/)
+npm run preview  →  vite preview of dist
+npm run lint     →  eslint .
+</pre>
+<p>Entry chain:</p>
+<pre>
+index.html
+    → src/main.tsx          (React root, StrictMode)
+        → src/App.tsx       (BrowserRouter + Routes + FCM setup)
+            → /             LoginPage
+            → /admin/dashboard/*   ProtectedRoute → Layout (sidebar) → page
+</pre>
+<p>Vite aliases <code>@</code> to <code>./src</code> (see <code>vite.config.ts</code>).</p>
+
+<h2>6. Folder structure</h2>
+<pre>
+zeizzu_rewrite_backend-Staging-adminpanel-zeizzu/
+├── .env                          Google Maps key only
+├── firebase-config.tsx           FCM web SDK init + token + foreground listener
+├── index.html
+├── package.json
+├── vite.config.ts
+├── public/
+│   └── firebase-messaging-sw.js  Background push worker
+└── src/
+    ├── main.tsx                  App bootstrap
+    ├── App.tsx                   All routes
+    ├── Layout.tsx                Sidebar + Outlet
+    ├── config/apiConfig.ts       HARDCODED BASE_URL
+    ├── api/                      Small revenue helpers
+    ├── app/                      Page screens (dashboard, rides, wallets…)
+    ├── components/               Feature UI + shadcn wrappers
+    │   └── ui/                   shadcn primitives
+    ├── utils/                    REST service layer (one file per domain)
+    │   └── apiFetcher.ts         Shared GET/POST/PUT/DELETE + 401 logout
+    ├── hooks/
+    ├── lib/utils.ts              cn() class helper
+    └── types/
+</pre>
+
+<p><b>Mental model:</b> <code>app/</code> = screens, <code>components/</code> = widgets/tables/forms, <code>utils/</code> = API calls, <code>config/</code> = backend host.</p>
+
+<h2>7. Request / data flow</h2>
+<p>Every authenticated screen follows the same pattern.</p>
+<pre>
+  User opens a page (example: All Rides)
+              │
+              ▼
+  Page / table component reads authToken from localStorage
+              │
+              ▼
+  Calls a domain service, e.g. RideService.getAllRides()
+              │
+              ▼
+  Service builds URL = BASE_URL + "/api/admin/get-all-rides/{page}/{limit}"
+              │
+              ▼
+  apiGetFetcher / apiPostFetcher / fetch()
+      headers: Content-Type: application/json
+               Authorization: Bearer &lt;authToken&gt;
+              │
+              ▼
+  https://api.live.avalift.ae  (REST backend)
+              │
+         ┌────┴────┐
+         ▼         ▼
+      200 OK     401 Unauthorized
+         │         │
+         ▼         ▼
+   JSON → table   apiFetcher clears localStorage
+   / charts       and redirects to /
+</pre>
+
+<p>Shared HTTP helpers live in <code>src/utils/apiFetcher.ts</code>:</p>
+<ul>
+  <li>JSON: GET, POST, PUT, DELETE</li>
+  <li>Multipart: POST / PUT FormData (vehicle images, documents, etc.)</li>
+  <li>On 401: wipe <code>authToken</code>, <code>allowedOrganization</code>, <code>roles</code>, <code>permissions</code>, <code>isLoggedIn</code> and send the browser to login</li>
+</ul>
+
+<p>There is no Redux / Zustand / React Query global store. State is mostly:</p>
+<ul>
+  <li>React <code>useState</code> / <code>useEffect</code> per page</li>
+  <li><code>localStorage</code> for session</li>
+</ul>
+
+<h2>8. Login, session, and access control</h2>
+
+<h3>8.1 Login sequence</h3>
+<pre>
+  1. Browser opens /
+  2. App registers /firebase-messaging-sw.js
+  3. Requests Notification permission → FCM device token
+  4. User submits email + password on LoginForm
+  5. POST {BASE_URL}/api/auth/admin-login
+       body: { email_id, password, device_id: fcmToken }
+  6. Backend returns token + user + roles + permissions + allowedOrganization
+  7. Saved in localStorage:
+       authToken
+       isLoggedIn = "true"
+       allowedOrganization
+       roles          (JSON array)
+       permissions    (JSON array)
+  8. Navigate to /admin/dashboard
+  9. ProtectedRoute checks isLoggedIn + authToken
+</pre>
+
+<p>Forgot password is a 3-step modal flow on the same login screen:</p>
+<ol>
+  <li><code>POST /api/auth/admin-forgot-password</code></li>
+  <li><code>POST /api/auth/admin-verify-otp</code></li>
+  <li><code>POST /api/admin/admin-reset-password</code></li>
+</ol>
+<p>Logged-in password change: <code>POST /api/auth/change-password</code>.</p>
+<p>Logout: <code>POST /api/auth/logout</code> then clear storage.</p>
+<p>A <code>storage</code> event listener in <code>App.tsx</code> keeps login/logout in sync across browser tabs.</p>
+
+<h3>8.2 Protected routes</h3>
+<p><code>src/components/ProtectedRoute.tsx</code> only checks that <code>isLoggedIn === "true"</code> and <code>authToken</code> exist. It does <b>not</b> check permissions per URL. If a user knows a URL, they can open it unless the API itself rejects the call.</p>
+<p>Menu visibility <b>is</b> permission-based in <code>src/components/app-sidebar.tsx</code>.</p>
+
+<h3>8.3 Sidebar permissions</h3>
+<table>
+  <tr><th>Menu</th><th>Permission key(s) required (user needs at least one)</th></tr>
+  <tr><td>Dashboard</td><td>Always shown</td></tr>
+  <tr><td>Available Chauffeurs</td><td>chauffeur.management, chauffeur.available.view</td></tr>
+  <tr><td>Organization</td><td>organization.management</td></tr>
+  <tr><td>Users &amp; Customers</td><td>customer.management (operators are also allowed this menu)</td></tr>
+  <tr><td>Manage Pricing</td><td>price.management, reports.generate</td></tr>
+  <tr><td>Rides</td><td>ride.management, ride.create</td></tr>
+  <tr><td>PD Activities</td><td>pd.management</td></tr>
+  <tr><td>Coupons</td><td>coupon.management, coupons.create</td></tr>
+  <tr><td>Revenue Report</td><td>cash.management, reports.view</td></tr>
+  <tr><td>Vehicles</td><td>vehicle.management, vehicles.view</td></tr>
+  <tr><td>Wallet / Tip Wallet</td><td>wallet.management, reports.view</td></tr>
+  <tr><td>Invoice</td><td>revenuereport.management, invoice.view</td></tr>
+  <tr><td>Send Notification</td><td>users.create</td></tr>
+</table>
+<p>
+<code>allowedOrganization</code> of <code>*</code> or <code>1</code> is treated as platform-wide (Avalift). Other org IDs are treated as organization-scoped. For those users, “Revenue Report” is relabelled “Ride Report”, and the dashboard can show a pending payment card.
+</p>
+<p>Super-admin detection helpers live in <code>src/utils/roleAccess.ts</code> (normalized names like <code>super_admin</code>).</p>
+
+<h2>9. Firebase and Google Maps</h2>
+
+<h3>9.1 Firebase Cloud Messaging</h3>
+<ul>
+  <li>Project: <code>avalift-740dd</code></li>
+  <li>Used for: admin push notifications (foreground toast + sound, background via service worker)</li>
+  <li>FCM token is sent as <code>device_id</code> on login so the backend can target this browser</li>
+  <li>Config is hardcoded (not env). <code>src/app/firebase.ts</code> contains a placeholder Zeizzu config and is not the live FCM path.</li>
+</ul>
+
+<h3>9.2 Google Maps</h3>
+<ul>
+  <li>Key: <code>VITE_GOOGLE_MAPS_API_KEY</code> in <code>.env</code></li>
+  <li>Used on: available chauffeurs map, add-ride place picker, ride details map</li>
+  <li>Distance Matrix used for driving time / distance estimates when creating rides</li>
+</ul>
+
+<h3>9.3 Other third-party HTTP</h3>
+<ul>
+  <li>Microlink (<code>https://api.microlink.io</code>) — optional link screenshot preview component</li>
+  <li>Google static map pin icons in RideMap</li>
+</ul>
+
+<h2>10. Module catalogue (every screen)</h2>
+<p>All authenticated URLs sit under <code>/admin/dashboard</code> inside <code>Layout</code> (left sidebar + main panel).</p>
+
+<table>
+  <tr><th>Module</th><th>URL path</th><th>What the user does</th><th>Main service file</th></tr>
+  <tr><td>Login</td><td>/</td><td>Sign in, forgot password / OTP / reset</td><td>authService.ts</td></tr>
+  <tr><td>Dashboard</td><td>/admin/dashboard</td><td>KPI cards, charts (completed vs cancelled, rides by chauffeur, pie), scheduled rides shortcut, recent ride table; org-scoped pending payment</td><td>dashboardService.ts</td></tr>
+  <tr><td>Available Chauffeurs</td><td>…/AvailableDriversPage</td><td>Map of nearby chauffeurs</td><td>avilableDriversSerivce.ts, location API</td></tr>
+  <tr><td>Driver log summary</td><td>…/AvailableDriversPage/DriverLogSummaryPage</td><td>User / chauffeur activity logs</td><td>driverService.ts</td></tr>
+  <tr><td>Organizations</td><td>…/organization</td><td>Create / list / update / activate organizations</td><td>organizationSevice.tsx</td></tr>
+  <tr><td>Admin users</td><td>…/Users</td><td>Create, update, delete admin users and roles</td><td>AdminUsersService.ts</td></tr>
+  <tr><td>Customers</td><td>…/customers</td><td>Individual customers CRUD</td><td>customerService.ts</td></tr>
+  <tr><td>Chauffeurs</td><td>…/drivers</td><td>Chauffeur list, create, update, assign to rides, active/inactive</td><td>driverService.ts</td></tr>
+  <tr><td>PD staff</td><td>…/pd</td><td>Pickup-drop users CRUD, assign PD, active/inactive</td><td>pdService.tsx</td></tr>
+  <tr><td>Organization customers</td><td>…/OrganizationCustomer</td><td>Org-admin users for companies</td><td>CooperateCustomerService.ts</td></tr>
+  <tr><td>Avalift pricing</td><td>…/ManagePricing</td><td>Add / show / update fares</td><td>pricingService.ts</td></tr>
+  <tr><td>Other org pricing</td><td>…/OtherOrganzationPricing</td><td>Per-organization fare rules</td><td>pricingService.ts</td></tr>
+  <tr><td>Add ride</td><td>…/AddRidesPage</td><td>Create on-demand or scheduled ride for customer or org user, estimate fare, pick places on map</td><td>RideService.ts, fareService.ts, AddridesTable.tsx</td></tr>
+  <tr><td>All rides</td><td>…/AllRides</td><td>List, filter, assign chauffeur, start/complete/cancel, cash/card, export Excel</td><td>RideService.ts</td></tr>
+  <tr><td>PD pickup &amp; drop history</td><td>…/PdPickupDrop</td><td>PD ride history</td><td>pdRideHistoryService.ts</td></tr>
+  <tr><td>PD status</td><td>…/PdStatus</td><td>Current PD status table</td><td>pdService / PDStatusTable</td></tr>
+  <tr><td>Chauffeur–PD rides</td><td>…/Chaffeur-PD-Ride</td><td>Rides linking chauffeur and PD</td><td>RideService / pdService</td></tr>
+  <tr><td>Coupons</td><td>…/coupons</td><td>Create, list, delete coupons, usage summary</td><td>couponService.tsx</td></tr>
+  <tr><td>Coupon user groups</td><td>…/coupons/usergroup</td><td>Groups and members for coupon targeting</td><td>GroupService.ts, CouponGroupService.ts</td></tr>
+  <tr><td>Coupon details</td><td>…/coupons/details</td><td>Usage details, update coupon</td><td>coupon pages</td></tr>
+  <tr><td>Revenue / ride report</td><td>…/RevenueReport</td><td>Revenue report, credited rides, Excel export</td><td>revenueService.ts</td></tr>
+  <tr><td>All vehicles</td><td>…/AllVehicle</td><td>Vehicle CRUD, org vehicles, plate region</td><td>vehicleService.ts</td></tr>
+  <tr><td>Brands / models</td><td>…/AllBrands</td><td>Vehicle brands and models</td><td>brandService.ts, modelService.ts</td></tr>
+  <tr><td>Colors</td><td>…/AllColors</td><td>Vehicle colors page (routed)</td><td>vehicles screens</td></tr>
+  <tr><td>Customer wallet</td><td>…/wallet</td><td>Wallet details / balance / history</td><td>WalletService.ts</td></tr>
+  <tr><td>Chauffeur wallet</td><td>…/ChauffeurWallet (+ history / cash details)</td><td>Balances, history, cash handling, Excel export</td><td>WalletService.ts</td></tr>
+  <tr><td>PD wallet</td><td>…/PDWallet (+ history / details)</td><td>PD wallet and cash</td><td>WalletService.ts</td></tr>
+  <tr><td>Admin wallet</td><td>…/AdminWallet</td><td>Platform wallet history / export</td><td>WalletService.ts</td></tr>
+  <tr><td>Tip wallet</td><td>…/TipWallet, TipWalletDetails</td><td>Chauffeur tips, payout</td><td>WalletService.ts</td></tr>
+  <tr><td>Chauffeur cash / PD cash</td><td>…/ChauffeurCash, PdCash</td><td>Cash handling screens</td><td>Wallet / cash components</td></tr>
+  <tr><td>Invoice</td><td>…/InvoicePage</td><td>List invoices, download PDF, record payment</td><td>InvoiceService.ts</td></tr>
+  <tr><td>Invoice report</td><td>…/InvoiceReport</td><td>Generate invoice / report by date</td><td>revenuereportService.ts</td></tr>
+  <tr><td>Banks</td><td>…/banks</td><td>Bank account details (route exists; sidebar item currently commented)</td><td>bankService.ts</td></tr>
+  <tr><td>Notifications list</td><td>…/Notifications</td><td>Admin notification list</td><td>notificationService.ts</td></tr>
+  <tr><td>Send notification</td><td>…/Notifications/send</td><td>Bulk push send</td><td>notificationService.ts</td></tr>
+  <tr><td>Account</td><td>…/Account</td><td>Profile / account</td><td>userService.ts</td></tr>
+  <tr><td>Change password</td><td>…/change-password</td><td>Change current password</td><td>authService.ts</td></tr>
+</table>
+
+<p>Placeholder routes exist in <code>App.tsx</code> without page components: <code>newcoupons</code>, <code>allcoupons</code>, <code>security</code>, <code>capabilities</code>, <code>roles</code>, <code>allpage</code>, <code>settings</code>, and a bare <code>Rides</code> path. They do not render a feature screen.</p>
+
+<h3>10.1 Domain map (what talks to what)</h3>
+<pre>
+                    ┌──────────── Dashboard ────────────┐
+                    │  stats, charts, scheduled rides   │
+                    └───────────────┬───────────────────┘
+                                    │
+     ┌──────────────┬───────────────┼────────────────┬────────────────┐
+     ▼              ▼               ▼                ▼                ▼
+  People         Fleet           Operations       Money            Growth
+  ────────       ─────           ──────────       ─────            ──────
+  Admin users    Vehicles        All rides        Wallets          Coupons
+  Customers      Brands          Add ride         Tips             User groups
+  Chauffeurs     Models          Assign chauffeur Invoices         Notifications
+  PDs            Colors          PD rides         Revenue report
+  Org customers                  Nearby map       Bank details
+  Organizations                  Pricing / fares  Cash handling
+</pre>
+
+<h2>11. API catalogue (grouped by domain)</h2>
+<p>Base: <code>https://api.live.avalift.ae</code> (from <code>src/config/apiConfig.ts</code>). Paths below are appended after that host.</p>
+
+<h3>11.1 Auth</h3>
+<table>
+  <tr><th>Method / path</th><th>Used for</th></tr>
+  <tr><td>POST /api/auth/admin-login</td><td>Admin login</td></tr>
+  <tr><td>POST /api/auth/logout</td><td>Logout</td></tr>
+  <tr><td>POST /api/auth/admin-forgot-password</td><td>Send reset OTP</td></tr>
+  <tr><td>POST /api/auth/admin-verify-otp</td><td>Verify OTP</td></tr>
+  <tr><td>POST /api/admin/admin-reset-password</td><td>Set new password</td></tr>
+  <tr><td>POST /api/auth/change-password</td><td>Change password while logged in</td></tr>
+</table>
+
+<h3>11.2 Dashboard &amp; profile</h3>
+<table>
+  <tr><th>Method / path</th><th>Used for</th></tr>
+  <tr><td>/api/user/dashboard</td><td>Dashboard stats / charts payload</td></tr>
+  <tr><td>POST /api/admin/organization-pending-payment-amount</td><td>Org pending dues</td></tr>
+  <tr><td>/api/user/profile</td><td>Logged-in profile</td></tr>
+</table>
+
+<h3>11.3 Users — customers, chauffeurs, PD, org admins, admin users</h3>
+<table>
+  <tr><th>Method / path</th><th>Used for</th></tr>
+  <tr><td>/api/user/customers/individual</td><td>List individual customers</td></tr>
+  <tr><td>/api/admin/create-customer</td><td>Create customer</td></tr>
+  <tr><td>/api/admin/update-customer/{id}</td><td>Update customer</td></tr>
+  <tr><td>/api/admin/delete-user</td><td>Delete user</td></tr>
+  <tr><td>/api/user/chauffeurs</td><td>List chauffeurs</td></tr>
+  <tr><td>/api/admin/get-available-chauffeurs</td><td>Available chauffeurs for assignment</td></tr>
+  <tr><td>/api/admin/create-pd-chauffeur</td><td>Create chauffeur or PD</td></tr>
+  <tr><td>/api/admin/update-pd-chauffeur/{id}</td><td>Update chauffeur or PD</td></tr>
+  <tr><td>/api/admin/make-user-active-inactive</td><td>Toggle active flag</td></tr>
+  <tr><td>/api/admin/get-all-users-log-summary</td><td>Activity logs</td></tr>
+  <tr><td>/api/user/pd</td><td>List PDs</td></tr>
+  <tr><td>/api/rides/get-chauffeurs-with-pd</td><td>Chauffeurs that have a PD</td></tr>
+  <tr><td>/api/admin/admin-assign-pd</td><td>Assign PD</td></tr>
+  <tr><td>/api/admin/get-all-chauffeurs-with-pd</td><td>Chauffeur–PD list</td></tr>
+  <tr><td>/api/organization/create-org-admin</td><td>Create organization customer / org admin</td></tr>
+  <tr><td>/api/organization/update-org-admin/{id}</td><td>Update org admin</td></tr>
+  <tr><td>/api/admin/create-admin-user</td><td>Create admin user</td></tr>
+  <tr><td>/api/admin/get-available-admin-roles</td><td>Role dropdown</td></tr>
+  <tr><td>/api/admin/get-all-admin-users</td><td>List admin users</td></tr>
+  <tr><td>/api/admin/update-admin-user/{id}</td><td>Update admin user</td></tr>
+  <tr><td>/api/admin/delete-admin-user/{id}</td><td>Delete admin user</td></tr>
+</table>
+
+<h3>11.4 Organizations</h3>
+<table>
+  <tr><th>Method / path</th><th>Used for</th></tr>
+  <tr><td>/api/organization/all-organizations</td><td>List orgs</td></tr>
+  <tr><td>/api/organization/create-organization</td><td>Create org</td></tr>
+  <tr><td>/api/organization/{id}</td><td>Get / update org</td></tr>
+  <tr><td>/api/organization/all-users-organizations</td><td>Org users / search (also used when creating rides and vehicles)</td></tr>
+  <tr><td>/api/organization/organization-status</td><td>Enable / disable org</td></tr>
+</table>
+
+<h3>11.5 Rides, fare, assignment, location</h3>
+<table>
+  <tr><th>Method / path</th><th>Used for</th></tr>
+  <tr><td>/api/admin/get-all-rides/{page}/{limit}</td><td>All rides list</td></tr>
+  <tr><td>/api/admin/get-all-chauffeur-rides/{page}/{limit}</td><td>Chauffeur rides</td></tr>
+  <tr><td>/api/admin/get-chauffeur-ride-by-id</td><td>One chauffeur ride</td></tr>
+  <tr><td>/api/rides/get-ride-by-id/{id}</td><td>Ride details</td></tr>
+  <tr><td>/api/admin/create-ride-for-customer/{customerId}</td><td>Create customer ride</td></tr>
+  <tr><td>/api/admin/create-schedule-ride-from-admin/{customerId}</td><td>Schedule customer ride</td></tr>
+  <tr><td>/api/admin/create-ride-for-organisation</td><td>Org ride</td></tr>
+  <tr><td>/api/admin/create-schedule-ride-from-org-user/{id}</td><td>Schedule org-user ride</td></tr>
+  <tr><td>/api/admin/get-organisational-ride</td><td>Org ride list</td></tr>
+  <tr><td>/api/rides/customers/calculate-estimate</td><td>Fare estimate</td></tr>
+  <tr><td>/api/admin/assign-chauffeur-to-ride/{rideId}</td><td>Assign chauffeur</td></tr>
+  <tr><td>/api/admin/re-assign-chauffeur/{rideId}</td><td>Reassign chauffeur</td></tr>
+  <tr><td>/api/admin/schedule-chauffeur-assign</td><td>Assign on scheduled ride</td></tr>
+  <tr><td>/api/admin/schedule-chauffeur-reassign</td><td>Reassign scheduled ride</td></tr>
+  <tr><td>/api/admin/rides/cancel</td><td>Cancel ride</td></tr>
+  <tr><td>/api/admin/rides/start-customer-ride</td><td>Start</td></tr>
+  <tr><td>/api/admin/rides/complete-customer-ride</td><td>Complete</td></tr>
+  <tr><td>/api/admin/rides/chauffeur-reached-customer</td><td>Reached pickup</td></tr>
+  <tr><td>/api/admin/rides/chauffeur-on-the-way</td><td>On the way</td></tr>
+  <tr><td>/api/admin/admin-cancel-chauffeur-pd-ride</td><td>Cancel chauffeur–PD ride</td></tr>
+  <tr><td>/api/admin/admin-cash-payment</td><td>Record cash</td></tr>
+  <tr><td>/api/payments/sale-payment</td><td>Card / sale payment</td></tr>
+  <tr><td>/api/payments/get-user-cards-by-id</td><td>Saved cards</td></tr>
+  <tr><td>/api/payments/select-payment-method</td><td>Choose payment method</td></tr>
+  <tr><td>/api/admin/export-rides-excel</td><td>Excel export</td></tr>
+  <tr><td>/api/rides/pd-history-admin</td><td>PD ride history</td></tr>
+  <tr><td>/api/location/getnearbyuser</td><td>Nearby chauffeurs for map</td></tr>
+</table>
+
+<h3>11.6 Vehicles, brands, models, pricing</h3>
+<table>
+  <tr><th>Method / path</th><th>Used for</th></tr>
+  <tr><td>/api/vehicle/vehicles/{page}/{limit}</td><td>Vehicle list</td></tr>
+  <tr><td>/api/vehicle/get-vehicle-by-id/{id}</td><td>Vehicle details</td></tr>
+  <tr><td>/api/admin/create-vehicle</td><td>Create vehicle</td></tr>
+  <tr><td>/api/admin/update-vehicle/{id}</td><td>Update vehicle</td></tr>
+  <tr><td>/api/vehicle/get-all-vehicle-by-organisation-id/{orgId}</td><td>Org fleet</td></tr>
+  <tr><td>/api/admin/delete-vehicle/{id}</td><td>Delete vehicle</td></tr>
+  <tr><td>/api/admin/delete-organization-vehicle/{id}</td><td>Delete org vehicle</td></tr>
+  <tr><td>/api/admin/get-plate-code-region</td><td>Plate region codes</td></tr>
+  <tr><td>/api/vehicle/brands</td><td>List brands</td></tr>
+  <tr><td>/api/vehicle/brand</td><td>Create brand</td></tr>
+  <tr><td>/api/vehicle/update-brand</td><td>Update brand</td></tr>
+  <tr><td>/api/vehicle/brand/delete-brand</td><td>Delete brand</td></tr>
+  <tr><td>/api/vehicle/all-brands-models</td><td>Brand–model tree</td></tr>
+  <tr><td>/api/vehicle/add-model</td><td>Add model</td></tr>
+  <tr><td>/api/admin/vehicle/models/{brand}</td><td>Models for a brand</td></tr>
+  <tr><td>/api/admin/add-pricing</td><td>Create fare</td></tr>
+  <tr><td>/api/admin/show-fares</td><td>List fares</td></tr>
+  <tr><td>/api/admin/get-pricing</td><td>Get pricing</td></tr>
+  <tr><td>/api/admin/update-pricing</td><td>Update pricing</td></tr>
+</table>
+
+<h3>11.7 Wallets, revenue, invoices, banks</h3>
+<table>
+  <tr><th>Method / path</th><th>Used for</th></tr>
+  <tr><td>/api/admin/get-user-wallet-details</td><td>Customer wallet</td></tr>
+  <tr><td>/api/admin/get-user-wallet-balance</td><td>Customer balance</td></tr>
+  <tr><td>/api/admin/get-chauffeur-wallet-balance</td><td>Chauffeur balance</td></tr>
+  <tr><td>/api/admin/get-chauffeur-wallet-by-id</td><td>One chauffeur wallet</td></tr>
+  <tr><td>/api/admin/get-chauffeur-wallet-history</td><td>Chauffeur history</td></tr>
+  <tr><td>/api/admin/get-pd-wallet-balance / by-id / history</td><td>PD wallet</td></tr>
+  <tr><td>/api/admin/get-admin-wallet-balance / history</td><td>Admin / platform wallet</td></tr>
+  <tr><td>/api/admin/get-all-chauffeur-tip-wallet-balances/{page}/{limit}</td><td>Tip wallets</td></tr>
+  <tr><td>/api/admin/get-chauffeur-tip-wallet-history</td><td>Tip history</td></tr>
+  <tr><td>/api/admin/get-chauffeur-tip-wallet-logs-by-id/{page}/{limit}</td><td>Tip logs</td></tr>
+  <tr><td>/api/admin/tip-payout</td><td>Payout tips</td></tr>
+  <tr><td>/api/admin/export-*-walletlogs</td><td>Excel exports for PD / admin / chauffeur / tip wallets</td></tr>
+  <tr><td>/api/admin/revenue-report</td><td>Revenue report</td></tr>
+  <tr><td>/api/admin/get-credited-rides</td><td>Credited rides</td></tr>
+  <tr><td>/api/revenue</td><td>Legacy revenue helper in src/api/</td></tr>
+  <tr><td>/api/admin/get-invoices</td><td>Invoice list</td></tr>
+  <tr><td>/api/admin/generate-invoice</td><td>Generate invoice</td></tr>
+  <tr><td>/api/admin/invoice-payment</td><td>Record invoice payment</td></tr>
+  <tr><td>/api/admin/get-all-bank-details</td><td>Bank list</td></tr>
+  <tr><td>/api/admin/get-bank-account-details-by-id</td><td>One bank account</td></tr>
+  <tr><td>/api/admin/add-bank-account-details</td><td>Add bank account</td></tr>
+</table>
+
+<h3>11.8 Coupons and notifications</h3>
+<table>
+  <tr><th>Method / path</th><th>Used for</th></tr>
+  <tr><td>/api/coupons/view-all</td><td>All coupons</td></tr>
+  <tr><td>/api/coupons/create-coupons</td><td>Create</td></tr>
+  <tr><td>/api/coupons/update-coupons/{id}</td><td>Update</td></tr>
+  <tr><td>/api/coupons/delete-coupons/{id}</td><td>Delete</td></tr>
+  <tr><td>/api/coupons/{couponId}</td><td>One coupon</td></tr>
+  <tr><td>/api/admin/get-coupon-usage-summary</td><td>Usage summary</td></tr>
+  <tr><td>/api/admin/get-coupon-usage-details</td><td>Usage details</td></tr>
+  <tr><td>/api/coupons/groups/view | add | edit | delete</td><td>Coupon groups</td></tr>
+  <tr><td>/api/coupons/groups/members/view | add | delete</td><td>Group members</td></tr>
+  <tr><td>/api/admin/notification-list-admin/{page}/{limit}</td><td>Notification inbox</td></tr>
+  <tr><td>/api/admin/send-bulk-notification</td><td>Send bulk push</td></tr>
+  <tr><td>/api/admin/get-bulk-notification</td><td>Sent bulk list</td></tr>
+</table>
+
+<h2>12. Environments</h2>
+<p>Switching environments is done by commenting/uncommenting one line in <code>src/config/apiConfig.ts</code>:</p>
+<table>
+  <tr><th>Label</th><th>URL (as written in code)</th><th>Currently active?</th></tr>
+  <tr><td>Avalift live</td><td>https://api.live.avalift.ae</td><td><b>Yes</b></td></tr>
+  <tr><td>Avalift dev</td><td>https://api.dev.avalift.ae</td><td>No</td></tr>
+  <tr><td>Avalift stage</td><td>https://api.stage.avalift.ae/</td><td>No (trailing slash in comment)</td></tr>
+  <tr><td>Older Zeizzu hosts</td><td>zapiin / zapi / stage.api / zlive.api.zeizzu.com</td><td>No</td></tr>
+  <tr><td>Raw IPs</td><td>http://13.232.29.73:5050 , http://65.1.213.10:5050</td><td>No</td></tr>
+</table>
+<p class="note">
+Because the URL is compiled into the frontend, changing environment requires a rebuild / restart of Vite. There is no runtime env switcher in the UI.
+</p>
+
+<h2>13. How to run locally</h2>
+<ol>
+  <li>Install Node.js (project was last run on Node 26; Vite 6 / this stack is more typically used with Node 18 or 20 LTS).</li>
+  <li>In the project folder: <code>npm i</code></li>
+  <li>Confirm <code>.env</code> has a valid <code>VITE_GOOGLE_MAPS_API_KEY</code> if you need maps.</li>
+  <li>Confirm <code>src/config/apiConfig.ts</code> points at the backend you want (live vs stage vs dev).</li>
+  <li><code>npm run dev</code> → open <code>http://localhost:5173/</code></li>
+  <li>Log in with an admin account that exists on that backend.</li>
+</ol>
+<p>
+Need enough free disk space before <code>npm i</code>. A previous install failed with “no space left on device”, which left <code>react-icons</code> incomplete and crashed Vite with a missing <code>lib/index.mjs</code>.
+</p>
+
+<h2>14. Important engineering notes</h2>
+<ol>
+  <li><b>Frontend only.</b> Databases, matching, payments server, and mobile apps are outside this repository.</li>
+  <li><b>Hardcoded API host.</b> All business data comes from <code>BASE_URL</code> in <code>apiConfig.ts</code>. Recommended improvement: <code>VITE_API_BASE_URL</code> in <code>.env</code>.</li>
+  <li><b>Secrets in source.</b> Firebase web config / VAPID key are in repo files. Google Maps key is in <code>.env</code> (Vite exposes any <code>VITE_</code> key to the browser anyway).</li>
+  <li><b>Auth model.</b> JWT-like token in localStorage. Sidebar hides menus by permission; routes are not permission-gated individually.</li>
+  <li><b>Org scoping.</b> <code>allowedOrganization</code> of <code>*</code> or <code>1</code> = platform admin. Any other ID = single-organization operator experience.</li>
+  <li><b>UI mix.</b> Primary design system is shadcn/Radix + Tailwind; Ant Design is also present. Icons mix lucide-react and react-icons.</li>
+  <li><b>No dedicated test suite</b> in package.json (no Jest / Vitest / Cypress scripts).</li>
+  <li><b>Empty routes</b> in App.tsx (settings, roles, etc.) are stubs.</li>
+  <li><b>Git remote on the old README</b> points at GitLab <code>avalift_admin_panel</code>. Product branding in the UI is Avalift.</li>
+</ol>
+
+<h2>15. One-page summary</h2>
+<pre>
+Avalift Admin Panel  =  React 18 + TS + Vite SPA
+         │
+         │  login token in localStorage
+         │  menus filtered by permissions
+         ▼
+REST backend  https://api.live.avalift.ae
+         │
+         ├── people (admins, customers, chauffeurs, PDs, orgs)
+         ├── rides (create, assign, start, pay, export)
+         ├── fleet (vehicles, brands, models, fares)
+         ├── money (wallets, tips, invoices, revenue, banks)
+         └── growth (coupons, notifications)
+
+Plus Google Maps (key in .env) and Firebase Cloud Messaging (hardcoded).
+</pre>
+
+<p class="meta" style="margin-top: 40px;">
+End of document. Open this file in a browser, Select All, Copy, then Paste into Google Docs. After paste: set Heading 1 / Heading 2 styles if Docs did not map them, and set diagram blocks to a monospace font (Consolas or Courier New) so boxes stay aligned.
+</p>
+
+</body>
+</html>
