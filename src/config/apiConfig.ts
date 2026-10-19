@@ -5,7 +5,8 @@
 // const BASE_URL = "https://zapi.zeizzu.com";
 // const BASE_URL = "https://stage.api.zeizzu.com";
 // const BASE_URL = "https://zlive.api.zeizzu.com";
-const BASE_URL = "https://api.live.avalift.ae";
+// const BASE_URL = "https://api.live.avalift.ae";
+const BASE_URL = "https://avalift-dashboard.nexuses-online.com";
 // const BASE_URL = "https://api.dev.avalift.ae";
 // const BASE_URL = "https://api.stage.avalift.ae/";
 
